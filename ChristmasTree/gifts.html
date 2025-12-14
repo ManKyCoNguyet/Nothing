@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Magic Tree: Flat Ground Circle</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: transparent;
+            font-family: 'Brush Script MT', 'Lucida Handwriting', cursive, sans-serif; 
+        }
+        canvas {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        #message-container {
+            position: absolute;
+            bottom: 8%;
+            left: 50%;
+            transform: translateX(-50%);
+            text-align: center;
+            z-index: 10;
+            pointer-events: none;
+            width: 100%;
+        }
+
+        h1 {
+            font-size: 3rem; 
+            color: #FFF8DC; 
+            margin: 0;
+            letter-spacing: 2px;
+            text-shadow: 
+                0 0 5px #FFFFFF, 
+                0 0 15px #FFD700, 
+                0 0 25px #DAA520;
+            opacity: 0; 
+            transition: opacity 3s ease-in-out; 
+            animation: sparkleText 3s infinite alternate;
+        }
+
+        @keyframes sparkleText {
+            0% { text-shadow: 0 0 5px #FFFFFF, 0 0 10px #FFD700; }
+            100% { text-shadow: 0 0 10px #FFFFFF, 0 0 20px #FFD700, 0 0 30px #DAA520; }
+        }
+
+        h1.show {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <div id="message-container">
+        <h1 id="merry-text">Merry Christmas</h1>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const messageElement = document.getElementById('merry-text');
+
+        let w, h;
+        const particles = [];
+        const snowParticles = []; 
+        const groundParticles = []; // Mảng chứa hạt cho vòng tròn mặt đất
+        const particleCount = 3800; 
+        const snowCount = 300; 
+        const groundCount = 800; // Số lượng hạt bụi ở dưới đất
+
+        const config = {
+            treeWidth: 350,
+            treeHeight: 650,
+            layers: 9,
+            spinSpeed: 0.005,
+            fallChance: 0.002,
+            groundLevel: 350
+        };
+
+        const colors = [
+            {r: 10, g: 90, b: 40},    
+            {r: 30, g: 120, b: 60},   
+            {r: 160, g: 110, b: 60}, 
+            {r: 255, g: 215, b: 0},   
+            {r: 240, g: 240, b: 255},
+            {r: 220, g: 30, b: 50}     
+        ];
+
+        const ornamentColors = [
+            {r: 150, g: 10, b: 40},    
+            {r: 255, g: 215, b: 0},   
+            {r: 40, g: 160, b: 60},    
+            {r: 230, g: 230, b: 255}   
+        ];
+
+        let revealY = 0; 
+        let isStarActive = false; 
+        let starTransition = 0; 
+        let isMessageShown = false; 
+
+        function resize() {
+            w = canvas.width = window.innerWidth;
+            h = canvas.height = window.innerHeight;
+            config.treeHeight = h * 0.85;
+            config.treeWidth = Math.min(w, h) * 0.52;
+            config.groundLevel = (config.treeHeight / 2) + 20;
+            
+            revealY = config.treeHeight / 2 + 150; 
+            isStarActive = false;
+            starTransition = 0;
+            
+            isMessageShown = false;
+            messageElement.classList.remove('show');
+            
+            initSnow();
+            initGround(); // Khởi tạo vòng tròn mặt đất
+        }
+        window.addEventListener('resize', resize);
+        
+        function lerp(start, end, t) {
+            return start * (1 - t) + end * t;
+        }
+
+        // --- Xử lý Mặt đất (Vòng tròn phẳng lì) ---
+        class GroundParticle {
+            constructor() {
+                this.reset();
+            }
+
+            reset() {
+                // Bán kính tầng cuối cùng của cây xấp xỉ config.treeWidth / 2
+                // Yêu cầu: Rộng hơn tầng cuối cỡ 2 lần => Radius = config.treeWidth
+                const maxRadius = config.treeWidth; 
+                
+                // Phân bố đều trong hình tròn
+                const r = Math.sqrt(Math.random()) * maxRadius; 
+                const angle = Math.random() * Math.PI * 2;
+
+                this.lx = Math.cos(angle) * r;
+                // Đặt Y cố định để tạo mặt phẳng lì, không nhô lên
+                this.ly = config.groundLevel; 
+                this.lz = Math.sin(angle) * r;
+
+                // Cùng loại với hạt cây (lấy từ mảng colors)
+                this.color = colors[Math.floor(Math.random() * colors.length)];
+                this.size = Math.random() * 2 + 0.5; // Kích thước nhỏ như hạt bụi
+                
+                // Hiệu ứng nhấp nháy nhẹ
+                this.baseAlpha = Math.random() * 0.5 + 0.2;
+                this.alpha = this.baseAlpha;
+                this.pulseSpeed = 0.02 + Math.random() * 0.03;
+                this.pulseOffset = Math.random() * Math.PI * 2;
+            }
+
+            update(time) {
+                // Tạo hiệu ứng lấp lánh nhẹ cho mặt đất
+                this.alpha = this.baseAlpha + Math.sin(time * this.pulseSpeed + this.pulseOffset) * 0.15;
+                if (this.alpha < 0) this.alpha = 0;
+            }
+
+            draw(ctx, cx, cy, rot) {
+                // Xoay theo trục Y cùng với cây
+                const rx = this.lx * Math.cos(rot) - this.lz * Math.sin(rot);
+                const rz = this.lx * Math.sin(rot) + this.lz * Math.cos(rot);
+                
+                const fov = 350;
+                const scale = fov / (fov + rz + 450);
+                
+                if (scale < 0) return;
+
+                const x2d = cx + rx * scale;
+                const y2d = cy + this.ly * scale;
+                const size = this.size * scale;
+
+                ctx.beginPath();
+                ctx.arc(x2d, y2d, size, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(${this.color.r}, ${this.color.g}, ${this.color.b}, ${this.alpha})`;
+                ctx.fill();
+            }
+        }
+
+        function initGround() {
+            groundParticles.length = 0;
+            for(let i=0; i<groundCount; i++) {
+                groundParticles.push(new GroundParticle());
+            }
+        }
+
+        // --- Hạt Tuyết ---
+        class SnowFlake {
+            constructor() {
+                this.reset(true);
+            }
+            
+            reset(initial = false) {
+                const treeTop = -config.treeHeight / 2 - 100;
+                const treeBottom = config.treeHeight / 2 + 100;
+
+                if (initial) {
+                    this.y = treeTop + Math.random() * (treeBottom - treeTop);
+                } else {
+                    this.y = treeTop;
+                }
+
+                let heightRatio = (this.y - treeTop) / (treeBottom - treeTop);
+                heightRatio = Math.max(0, Math.min(1, heightRatio));
+                
+                this.size = 1 + Math.random() * 1.5 + (Math.pow(heightRatio, 2) * 3.5);
+
+                const minR = config.treeWidth / 2 + 30;
+                const maxR = Math.max(w, h) * 0.7;
+                const distributionBias = lerp(0.8, 0.2, heightRatio); 
+                this.radius = minR + (Math.random() * distributionBias) * (maxR - minR);
+
+                this.angle = Math.random() * Math.PI * 2;
+                this.speedY = 0.5 + Math.random() * 1 + heightRatio * 1.5;
+                this.rotSpeed = 0.003 + Math.random() * 0.005; 
+                this.opacity = 0.3 + Math.random() * 0.7; 
+            }
+
+            update() {
+                this.y += this.speedY;
+                this.angle += this.rotSpeed;
+                const treeBottom = config.treeHeight / 2 + 100;
+                if (this.y > treeBottom) {
+                    this.reset();
+                }
+            }
+
+            draw(ctx, cx, cy, currentTreeRot) {
+                const myRot = (currentTreeRot * 0.1) + this.angle;
+                const rx = Math.cos(myRot) * this.radius;
+                const rz = Math.sin(myRot) * this.radius;
+                const fov = 350;
+                const scale = fov / (fov + rz + 450);
+                
+                if (scale < 0.1) return;
+
+                const x = cx + rx * scale;
+                const y = cy + this.y * scale; 
+                const depthOpacity = this.opacity * Math.min(1, scale * 1.2);
+
+                ctx.beginPath();
+                ctx.arc(x, y, this.size * scale, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255, 255, 255, ${depthOpacity})`;
+                ctx.fill();
+            }
+        }
+
+        function initSnow() {
+            snowParticles.length = 0;
+            for(let i=0; i<snowCount; i++) {
+                snowParticles.push(new SnowFlake());
+            }
+        }
+
+        // --- Hạt Cây (Lá, Quà, Châu) ---
+        class Particle {
+            constructor() {
+                const rand = Math.random();
+                this.isOrnament = rand < 0.007;
+                this.isGift = !this.isOrnament && rand < 0.010;
+                this.reset(true);
+            }
+
+            reset(initial = false) {
+                this.calculateLocalPosition();
+                
+                if (this.isOrnament) {
+                    this.color = ornamentColors[Math.floor(Math.random() * ornamentColors.length)];
+                    this.size = Math.random() * 4 + 5; 
+                    this.targetAlpha = 1.0;
+                } else if (this.isGift) {
+                    this.boxColor = '#FFD700'; 
+                    this.ribbonColor = '#B22222'; 
+                    this.size = Math.random() * 4 + 4; 
+                    this.targetAlpha = 1.0;
+                } else {
+                    this.color = colors[Math.floor(Math.random() * colors.length)];
+                    this.size = Math.random() * 2 + 0.5;
+                    this.targetAlpha = Math.random() * 0.6 + 0.4;
+                }
+
+                this.alpha = 0; 
+                this.fadeSpeed = 0.003 + Math.random() * 0.005; 
+                this.isFalling = false;
+                this.isGrounded = false;
+                this.groundLife = 300;
+                this.fallSpeed = 2 + Math.random() * 2;
+            }
+
+            calculateLocalPosition() {
+                let layerProgress = Math.pow(Math.random(), 0.4); 
+
+                let progressInLayer;
+                if (this.isOrnament || this.isGift) {
+                    progressInLayer = 0.7 + Math.random() * 0.3;
+                } else {
+                    progressInLayer = (layerProgress * config.layers) % 1;
+                }
+                
+                let baseR = config.treeWidth * layerProgress * 0.5;
+                let layerR = baseR * (0.3 + 2.0 * progressInLayer);
+                const angle = Math.random() * Math.PI * 2;
+                
+                this.angle = angle; 
+                this.lx = Math.cos(angle) * layerR;
+                this.ly = (layerProgress - 0.5) * config.treeHeight;
+                this.lz = Math.sin(angle) * layerR;
+            }
+
+            update(time) {
+                const currentAngle = this.angle + time * config.spinSpeed;
+                const spiralOffset = Math.sin(currentAngle) * 60; 
+                const triggerPoint = revealY + spiralOffset;
+                const canShow = this.ly > triggerPoint;
+
+                if (canShow && this.alpha < this.targetAlpha && !this.isGrounded) {
+                    this.alpha += this.fadeSpeed;
+                }
+
+                if ((this.isOrnament || this.isGift) && this.isFalling) this.isFalling = false;
+
+                if (this.isFalling) {
+                    this.ly += this.fallSpeed;
+                    this.lx += Math.sin(time * 0.1 + this.lz) * 0.2;
+                    this.lz += Math.cos(time * 0.1 + this.lx) * 0.2;
+                    if (this.ly >= config.groundLevel) {
+                        this.ly = config.groundLevel;
+                        this.isFalling = false;
+                        this.isGrounded = true;
+                        // Khi rơi xuống đất, giữ nguyên vị trí, không tản ra lung tung để giữ mặt phẳng
+                    }
+                } else if (this.isGrounded) {
+                    this.groundLife--;
+                    if (this.groundLife < 50) this.alpha -= 0.02;
+                    if (this.groundLife < 0 || this.alpha <= 0) {
+                        this.reset();
+                    }
+                } else {
+                    if (!this.isOrnament && !this.isGift && canShow && this.alpha > 0.4 && Math.random() < config.fallChance) {
+                        this.isFalling = true;
+                    }
+                }
+            }
+
+            draw(ctx, cx, cy, rot) {
+                if (this.alpha <= 0) return;
+                const rx = this.lx * Math.cos(rot) - this.lz * Math.sin(rot);
+                const rz = this.lx * Math.sin(rot) + this.lz * Math.cos(rot);
+                const fov = 350;
+                const scale = fov / (fov + rz + 450);
+                if (scale < 0) return;
+                const x2d = cx + rx * scale;
+                const y2d = cy + this.ly * scale;
+                let size = this.size * scale;
+                
+                ctx.save();
+                ctx.translate(x2d, y2d);
+
+                if (this.isGift) {
+                    ctx.globalCompositeOperation = 'source-over'; 
+                    ctx.rotate(rot * 0.5); 
+                    const boxSize = size * 1.8; 
+                    const ribbonWidth = boxSize * 0.3; 
+
+                    ctx.fillStyle = this.boxColor;
+                    ctx.globalAlpha = this.alpha;
+                    ctx.fillRect(-boxSize/2, -boxSize/2, boxSize, boxSize);
+
+                    ctx.fillStyle = this.ribbonColor;
+                    ctx.fillRect(-ribbonWidth/2, -boxSize/2, ribbonWidth, boxSize); 
+                    ctx.fillRect(-boxSize/2, -ribbonWidth/2, boxSize, ribbonWidth); 
+
+                    ctx.beginPath();
+                    ctx.arc(0, 0, ribbonWidth * 0.8, 0, Math.PI * 2);
+                    ctx.fill();
+                } 
+                else if (this.isOrnament) {
+                    size *= 1.1;
+                    
+                    const isGold = this.color.r === 255 && this.color.g === 215 && this.color.b === 0;
+                    
+                    if (isGold) {
+                        ctx.shadowColor = `rgba(255, 215, 0, ${this.alpha})`;
+                        ctx.shadowBlur = 25 * scale; 
+                    }
+
+                    const grad = ctx.createRadialGradient(-size*0.3, -size*0.3, size*0.1, 0, 0, size);
+                    grad.addColorStop(0, `rgba(255, 255, 255, ${this.alpha})`);
+                    grad.addColorStop(0.5, `rgba(${this.color.r}, ${this.color.g}, ${this.color.b}, ${this.alpha * 0.9})`);
+                    grad.addColorStop(1, `rgba(${this.color.r*0.6}, ${this.color.g*0.6}, ${this.color.b*0.6}, ${this.alpha * 1.0})`);
+                    ctx.beginPath();
+                    ctx.arc(0, 0, size, 0, Math.PI * 2);
+                    ctx.fillStyle = grad;
+                    ctx.fill();
+
+                    if (isGold) {
+                         ctx.shadowBlur = 0;
+                    }
+
+                    ctx.beginPath();
+                    ctx.ellipse(-size*0.35, -size*0.35, size*0.2, size*0.12, Math.PI/4, 0, Math.PI*2);
+                    ctx.fillStyle = `rgba(255, 255, 255, ${this.alpha})`; 
+                    ctx.fill();
+                } else {
+                    if (this.isGrounded) size *= 1.2;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, size, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(${this.color.r}, ${this.color.g}, ${this.color.b}, ${this.alpha})`;
+                    ctx.fill();
+                }
+                ctx.restore();
+            }
+        }
+
+        for(let i=0; i<particleCount; i++) {
+            particles.push(new Particle());
+        }
+        
+        resize();
+
+        // --- Ngôi Sao ---
+        function drawStar(cx, cy, time) {
+            const rot = -Math.PI / 2;
+            const spikes = 5;
+            const pulse = Math.sin(time * 0.05); 
+            const currentScale = 1 + (pulse * 0.15 * starTransition); 
+            const outerRadius = 26 * currentScale;
+            const innerRadius = 12 * currentScale;
+            const fov = 350;
+            const scale = fov / (fov + 0 + 450); 
+            const starY = cy + (-config.treeHeight / 2) * scale + 5; 
+
+            ctx.save();
+            ctx.translate(cx, starY);
+            ctx.rotate(Math.sin(time * 0.02) * 0.1); 
+            ctx.beginPath();
+            for (let i = 0; i < spikes; i++) {
+                let x = Math.cos(rot + i * Math.PI * 2 / spikes) * outerRadius;
+                let y = Math.sin(rot + i * Math.PI * 2 / spikes) * outerRadius;
+                ctx.lineTo(x, y);
+                x = Math.cos(rot + i * Math.PI * 2 / spikes + Math.PI / spikes) * innerRadius;
+                y = Math.sin(rot + i * Math.PI * 2 / spikes + Math.PI / spikes) * innerRadius;
+                ctx.lineTo(x, y);
+            }
+            ctx.closePath();
+            
+            const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, outerRadius);
+            const startR = 210, startG = 180, startB = 120; 
+            const endR = 255, endG = 235, endB = 100; 
+            const coreR = lerp(startR, 255, starTransition);
+            const coreG = lerp(startG, 255, starTransition);
+            const coreB = lerp(startB, 255, starTransition);
+            const edgeR = lerp(startR, endR, starTransition);
+            const edgeG = lerp(startG, endG, starTransition);
+            const edgeB = lerp(startB, endB, starTransition);
+
+            gradient.addColorStop(0, `rgb(${coreR}, ${coreG}, ${coreB})`);
+            gradient.addColorStop(0.4, `rgb(${edgeR}, ${edgeG}, ${edgeB})`);
+            gradient.addColorStop(1, `rgb(${edgeR}, ${edgeG}, ${edgeB})`);
+
+            const currentGlow = lerp(0, 50, starTransition); 
+            ctx.shadowBlur = currentGlow * currentScale; 
+            ctx.shadowColor = "#FFE570"; 
+            ctx.fillStyle = gradient;
+            ctx.fill();
+            ctx.restore();
+        }
+
+        let time = 0;
+        function animate() {
+            time++;
+            
+            const treeTop = -config.treeHeight / 2;
+            const distanceToTop = revealY - treeTop;
+            const totalDistance = config.treeHeight + 150;
+            
+            let progress = Math.max(0, Math.min(1, distanceToTop / totalDistance));
+            let currentSpeed = 0.5 + 2.5 * progress;
+            
+            if (revealY > treeTop - 50) { 
+                revealY -= currentSpeed;
+            }
+
+            if (revealY <= treeTop + 50) {
+                isStarActive = true;
+            }
+            
+            if (isStarActive && starTransition < 1) {
+                starTransition += 0.005; 
+                if (starTransition > 1) starTransition = 1;
+            }
+
+            if (starTransition >= 1 && !isMessageShown) {
+                messageElement.classList.add('show');
+                isMessageShown = true; 
+            }
+
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; 
+            ctx.fillRect(0, 0, w, h);
+            
+            const cx = w / 2;
+            const cy = h / 2;
+            const rot = time * config.spinSpeed;
+
+            ctx.globalCompositeOperation = 'source-over';
+            snowParticles.forEach(snow => {
+                snow.update();
+                snow.draw(ctx, cx, cy, rot);
+            });
+
+            ctx.globalCompositeOperation = 'lighter';
+            
+            // Vẽ mặt đất trước (hạt bụi tiên)
+            groundParticles.forEach(p => {
+                p.update(time);
+                p.draw(ctx, cx, cy, rot);
+            });
+
+            // Vẽ cây
+            particles.forEach(p => {
+                p.update(time);
+                p.draw(ctx, cx, cy, rot);
+            });
+            
+            ctx.globalCompositeOperation = 'source-over';
+            drawStar(cx, cy, time);
+            
+            requestAnimationFrame(animate);
+        }
+        animate();
+    </script>
+</body>
+</html>
