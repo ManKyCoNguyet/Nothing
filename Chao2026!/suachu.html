@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pháo Hoa Chào 2026 - Chữ Nét Hơn</title>
+    <style>
+        body {
+            background: #000;
+            margin: 0;
+            overflow: hidden;
+            /* Đảm bảo font được load trước khi vẽ lên canvas */
+            font-family: 'Arial Black', 'Arial Bold', sans-serif;
+        }
+        canvas {
+            display: block;
+            position: absolute;
+            top: 0; left: 0;
+            z-index: 1;
+        }
+        /* CSS cho nút bấm icon hộp quà */
+        #giftBtn {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(45deg, #ff0055, #ffcc00);
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 0 20px rgba(255, 0, 85, 0.6), 0 0 40px rgba(255, 204, 0, 0.4);
+            z-index: 10;
+            transition: all 0.3s ease;
+            outline: none;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        #giftBtn:hover {
+            transform: translate(-50%, -50%) scale(1.1) rotate(5deg);
+            box-shadow: 0 0 30px rgba(255, 0, 85, 0.8), 0 0 60px rgba(255, 204, 0, 0.6);
+        }
+        #giftBtn:active {
+            transform: translate(-50%, -50%) scale(0.95);
+        }
+        #giftBtn svg {
+            width: 40px;
+            height: 40px;
+            fill: #fff;
+        }
+    </style>
+</head>
+<body>
+
+<button id="giftBtn">
+    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path d="M20,8H16V5a1,1,0,0,0-1-1H9A1,1,0,0,0,8,5V8H4a1,1,0,0,0-1,1V19a1,1,0,0,0,1,1H20a1,1,0,0,0,1-1V9A1,1,0,0,0,20,8ZM10,6h4V8H10Zm9,13H16V14h3Zm-5,0H10V14h4Zm-5,0H5V14H9ZM5,10H9v2H5Zm6,2V10h4v2Zm6,0V10h3v2Z"/>
+    </svg>
+</button>
+<canvas id="canvas"></canvas>
+
+<script>
+    // --- CẤU HÌNH CƠ BẢN ---
+    window.requestAnimFrame = (function(){
+      return  window.requestAnimationFrame       || 
+              function( callback ){ window.setTimeout(callback, 1000 / 60); };
+    })();
+
+    var canvas = document.getElementById('canvas'),
+        ctx = canvas.getContext('2d'),
+        cw = window.innerWidth,
+        ch = window.innerHeight,
+        fireworks = [],
+        particles = [],
+        hue = 120,
+        timerTotal = 80,
+        timerTick = 0,
+        mousedown = false,
+        mx, my;
+        
+    canvas.width = cw;
+    canvas.height = ch;
+
+    let gameState = 'idle'; 
+    let countdownValue = 3;
+    let textCoordinates = [];
+    const giftBtn = document.getElementById('giftBtn');
+
+
+    // --- CÁC HÀM TIỆN ÍCH ---
+    function random( min, max ) { return Math.random() * ( max - min ) + min; }
+    function calculateDistance( p1x, p1y, p2x, p2y ) {
+        var xDistance = p1x - p2x, yDistance = p1y - p2y;
+        return Math.sqrt( Math.pow( xDistance, 2 ) + Math.pow( yDistance, 2 ) );
+    }
+
+    // --- CORE: TÍNH TOÁN TỌA ĐỘ CHỮ ---
+    function calculateTextCoordinates(text) {
+        var tmpCanvas = document.createElement('canvas');
+        var tmpCtx = tmpCanvas.getContext('2d');
+        tmpCanvas.width = cw; tmpCanvas.height = ch;
+
+        tmpCtx.font = '900 180px "Arial Black", Arial, sans-serif'; 
+        tmpCtx.fillStyle = '#ffffff';
+        tmpCtx.textAlign = 'center';
+        tmpCtx.textBaseline = 'middle';
+        tmpCtx.fillText(text, cw / 2, ch / 3); 
+
+        var imageData = tmpCtx.getImageData(0, 0, cw, ch);
+        var data = imageData.data;
+        var coords = [];
+        var density = 6;
+        for (var y = 0; y < ch; y += density) {
+            for (var x = 0; x < cw; x += density) {
+                var index = (y * cw + x) * 4 + 3; 
+                if (data[index] > 128) { coords.push({x: x, y: y}); }
+            }
+        }
+        return coords;
+    }
+
+    // --- LỚP FIREWORK (Tên lửa) ---
+    function Firework( sx, sy, tx, ty ) {
+        this.x = sx; this.y = sy; this.sx = sx; this.sy = sy;
+        this.tx = tx; this.ty = ty;
+        this.distanceToTarget = calculateDistance( sx, sy, tx, ty );
+        this.distanceTraveled = 0;
+        this.coordinates = [];
+        this.coordinateCount = 3;
+        while( this.coordinateCount-- ) { this.coordinates.push( [ this.x, this.y ] ); }
+        this.angle = Math.atan2( ty - sy, tx - sx );
+        this.speed = 2;
+        this.acceleration = 1.05;
+        this.brightness = random( 50, 70 );
+    }
+
+    Firework.prototype.update = function( index ) {
+        this.coordinates.pop();
+        this.coordinates.unshift( [ this.x, this.y ] );
+        this.speed *= this.acceleration;
+        var vx = Math.cos( this.angle ) * this.speed,
+            vy = Math.sin( this.angle ) * this.speed;
+        this.distanceTraveled = calculateDistance( this.sx, this.sy, this.x + vx, this.y + vy );
+
+        if( this.distanceTraveled >= this.distanceToTarget ) {
+            createParticles( this.tx, this.ty );
+            fireworks.splice( index, 1 );
+        } else {
+            this.x += vx; this.y += vy;
+        }
+    }
+
+    Firework.prototype.draw = function() {
+        ctx.beginPath();
+        ctx.moveTo( this.coordinates[ this.coordinates.length - 1 ][ 0 ], this.coordinates[ this.coordinates.length - 1 ][ 1 ] );
+        ctx.lineTo( this.x, this.y );
+        ctx.strokeStyle = 'hsl(' + hue + ', 100%, ' + this.brightness + '%)';
+        ctx.stroke();
+    }
+
+    // --- LỚP PARTICLE (Hạt nổ) ---
+    function Particle( x, y, isTextParticle = false, isBigExplosion = false ) {
+        this.x = x; this.y = y;
+        this.coordinates = [];
+        this.coordinateCount = 5;
+        while( this.coordinateCount-- ) { this.coordinates.push( [ this.x, this.y ] ); }
+        
+        if (isTextParticle) {
+            // --- SỬA ĐỔI Ở ĐÂY ---
+            this.angle = random( 0, Math.PI * 2 );
+            // Tốc độ ban đầu cực nhỏ, gần như đứng yên
+            this.speed = random( 0.05, 0.2 ); 
+            // Ma sát ít hơn để nó trôi rất chậm chứ không dừng hẳn
+            this.friction = 0.98; 
+            this.gravity = 0; 
+            this.decay = random( 0.002, 0.005 ); 
+            this.hue = random(0, 360); 
+            this.brightness = random( 60, 100 );
+            // ---------------------
+        } else {
+            this.angle = random( 0, Math.PI * 2 );
+            this.speed = isBigExplosion ? random(5, 15) : random( 1, 10 );
+            this.friction = 0.95;
+            this.gravity = 1;
+            this.decay = random( 0.015, 0.03 );
+            this.hue = isBigExplosion ? random(0, 360) : random( hue - 50, hue + 50 );
+            this.brightness = random( 50, 80 );
+        }
+        
+        this.alpha = 1;
+    }
+
+    Particle.prototype.update = function( index ) {
+        this.coordinates.pop();
+        this.coordinates.unshift( [ this.x, this.y ] );
+        this.speed *= this.friction;
+        this.x += Math.cos( this.angle ) * this.speed;
+        this.y += Math.sin( this.angle ) * this.speed + this.gravity;
+        this.alpha -= this.decay;
+        if( this.alpha <= this.decay ) { particles.splice( index, 1 ); }
+    }
+
+    Particle.prototype.draw = function() {
+        ctx.beginPath();
+        ctx.moveTo( this.coordinates[ this.coordinates.length - 1 ][ 0 ], this.coordinates[ this.coordinates.length - 1 ][ 1 ] );
+        ctx.lineTo( this.x, this.y );
+        ctx.strokeStyle = 'hsla(' + this.hue + ', 100%, ' + this.brightness + '%, ' + this.alpha + ')';
+        ctx.stroke();
+    }
+
+    function createParticles( x, y, isBigExplosion = false ) {
+        var particleCount = isBigExplosion ? 150 : 30; 
+        while( particleCount-- ) {
+            particles.push( new Particle( x, y, false, isBigExplosion ) );
+        }
+    }
+
+    // --- HÀM TẠO HIỆU ỨNG CHỮ ---
+    function createTextExplosion() {
+        textCoordinates = calculateTextCoordinates("CHÀO 2026!");
+        for(var i = 0; i < textCoordinates.length; i++) {
+            var p = textCoordinates[i];
+            particles.push( new Particle( p.x, p.y, true ) );
+        }
+
+        let textCenterY = ch / 3;
+        let textCenterX = cw / 2;
+        for(let i = 0; i < 8; i++) {
+            let angle = random(0, Math.PI * 2);
+            let radius = random(cw * 0.15, cw * 0.35);
+            let ex = textCenterX + Math.cos(angle) * radius;
+            let ey = textCenterY + Math.sin(angle) * radius * 0.8;
+            
+            setTimeout(() => {
+                createParticles(ex, ey, true); 
+            }, i * 150);
+        }
+    }
+
+    // --- XỬ LÝ SỰ KIỆN NÚT BẤM ---
+    giftBtn.addEventListener('click', function() {
+        if(gameState !== 'idle') return;
+
+        gameState = 'countdown';
+        countdownValue = 3;
+        giftBtn.style.display = 'none';
+
+        let timer = setInterval(() => {
+            countdownValue--;
+            if(countdownValue < 0) {
+                clearInterval(timer);
+                gameState = 'celebrating';
+                createTextExplosion();
+
+                setTimeout(() => {
+                    gameState = 'idle';
+                    giftBtn.style.display = 'flex'; 
+                }, 12000);
+            }
+        }, 1000);
+    });
+
+
+    // --- VÒNG LẶP CHÍNH ---
+    function loop() {
+        requestAnimFrame( loop );
+        hue += 0.5;
+
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.fillRect( 0, 0, cw, ch );
+        ctx.globalCompositeOperation = 'lighter';
+
+        if (gameState === 'countdown') {
+            ctx.font = '900 250px "Arial Black", Arial, sans-serif';
+            ctx.fillStyle = 'hsla(' + hue + ', 100%, 50%, 0.8)';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(countdownValue > 0 ? countdownValue : "", cw / 2, ch / 2);
+        }
+
+        var i = fireworks.length;
+        while( i-- ) { fireworks[ i ].draw(); fireworks[ i ].update( i ); }
+        var i = particles.length;
+        while( i-- ) { particles[ i ].draw(); particles[ i ].update( i ); }
+
+        if( gameState === 'idle' ) {
+            if( timerTick >= timerTotal ) {
+                if( !mousedown ) {
+                    fireworks.push( new Firework( cw / 2, ch, random( 0, cw ), random( 0, ch / 2 ) ) );
+                    timerTick = 0;
+                }
+            } else { timerTick++; }
+        }
+        if( mousedown && gameState === 'idle' ) {
+             fireworks.push( new Firework( cw / 2, ch, mx, my ) );
+        }
+    }
+
+    canvas.addEventListener('mousemove', function(e){ mx=e.pageX-canvas.offsetLeft; my=e.pageY-canvas.offsetTop; });
+    canvas.addEventListener('mousedown', function(e){ e.preventDefault(); mousedown=true; });
+    canvas.addEventListener('mouseup', function(e){ e.preventDefault(); mousedown=false; });
+
+    window.onload = loop;
+    window.onresize = function() { cw=window.innerWidth; ch=window.innerHeight; canvas.width=cw; canvas.height=ch; };
+</script>
+
+</body>
+</html>

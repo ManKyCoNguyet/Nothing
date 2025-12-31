@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pháo Hoa Chào 2026</title>
+    <style>
+        body {
+            background: #000;
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Arial', sans-serif;
+        }
+        canvas {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        /* CSS cho nút bấm */
+        #startBtn {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 15px 30px;
+            font-size: 24px;
+            font-weight: bold;
+            color: #fff;
+            background: linear-gradient(45deg, #ff0055, #0099ff);
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(255, 0, 85, 0.4);
+            z-index: 10; /* Nổi lên trên canvas */
+            transition: all 0.3s ease;
+            outline: none;
+        }
+        #startBtn:hover {
+            transform: translate(-50%, -50%) scale(1.05);
+            box-shadow: 0 6px 20px rgba(0, 153, 255, 0.6);
+        }
+        #startBtn:active {
+            transform: translate(-50%, -50%) scale(0.95);
+        }
+    </style>
+</head>
+<body>
+
+<button id="startBtn">BẮN PHÁO HOA CHÚC MỪNG!</button>
+<canvas id="canvas"></canvas>
+
+<script>
+    // --- CẤU HÌNH CƠ BẢN ---
+    window.requestAnimFrame = (function(){
+      return  window.requestAnimationFrame       || 
+              window.webkitRequestAnimationFrame || 
+              window.mozRequestAnimationFrame    || 
+              function( callback ){ window.setTimeout(callback, 1000 / 60); };
+    })();
+
+    var canvas = document.getElementById('canvas'),
+        ctx = canvas.getContext('2d'),
+        cw = window.innerWidth,
+        ch = window.innerHeight,
+        fireworks = [],
+        particles = [],
+        hue = 120,
+        limiterTotal = 5,
+        limiterTick = 0,
+        timerTotal = 80,
+        timerTick = 0,
+        mousedown = false,
+        mx, my;
+        
+    canvas.width = cw;
+    canvas.height = ch;
+
+    // --- CÁC BIẾN TRẠNG THÁI MỚI ---
+    let gameState = 'idle'; // 'idle', 'countdown', 'celebrating'
+    let countdownValue = 3;
+    let textCoordinates = []; // Mảng chứa tọa độ các điểm ảnh của chữ
+    const startBtn = document.getElementById('startBtn');
+
+
+    // --- CÁC HÀM TIỆN ÍCH ---
+    function random( min, max ) {
+        return Math.random() * ( max - min ) + min;
+    }
+
+    function calculateDistance( p1x, p1y, p2x, p2y ) {
+        var xDistance = p1x - p2x,
+            yDistance = p1y - p2y;
+        return Math.sqrt( Math.pow( xDistance, 2 ) + Math.pow( yDistance, 2 ) );
+    }
+
+    // --- CORE: HÀM TÍNH TOÁN TỌA ĐỘ CHỮ (Kỹ thuật xử lý ảnh) ---
+    function calculateTextCoordinates(text) {
+        // 1. Tạo một canvas tạm trong bộ nhớ
+        var tmpCanvas = document.createElement('canvas');
+        var tmpCtx = tmpCanvas.getContext('2d');
+        tmpCanvas.width = cw;
+        tmpCanvas.height = ch;
+
+        // 2. Vẽ chữ màu trắng lên canvas tạm
+        tmpCtx.font = 'bold 120px Arial'; // Font chữ to, đậm
+        tmpCtx.fillStyle = '#ffffff';
+        tmpCtx.textAlign = 'center';
+        tmpCtx.textBaseline = 'middle';
+        tmpCtx.fillText(text, cw / 2, ch / 3); // Vẽ ở khoảng 1/3 phía trên màn hình
+
+        // 3. Lấy dữ liệu pixel
+        var imageData = tmpCtx.getImageData(0, 0, cw, ch);
+        var data = imageData.data;
+        var coords = [];
+        
+        // 4. Quét qua các pixel (nhảy cóc để giảm số lượng hạt cho đỡ lag)
+        var density = 7; // Càng lớn càng thưa hạt (tăng hiệu năng)
+        for (var y = 0; y < ch; y += density) {
+            for (var x = 0; x < cw; x += density) {
+                // Vị trí của kênh Alpha trong mảng dữ liệu pixel
+                var index = (y * cw + x) * 4 + 3; 
+                // Nếu pixel có độ trong suốt > 128 (tức là có nét chữ)
+                if (data[index] > 128) {
+                    coords.push({x: x, y: y});
+                }
+            }
+        }
+        return coords;
+    }
+
+    // --- LỚP FIREWORK (Tên lửa - giữ nguyên) ---
+    function Firework( sx, sy, tx, ty ) {
+        this.x = sx; this.y = sy; this.sx = sx; this.sy = sy;
+        this.tx = tx; this.ty = ty;
+        this.distanceToTarget = calculateDistance( sx, sy, tx, ty );
+        this.distanceTraveled = 0;
+        this.coordinates = [];
+        this.coordinateCount = 3;
+        while( this.coordinateCount-- ) { this.coordinates.push( [ this.x, this.y ] ); }
+        this.angle = Math.atan2( ty - sy, tx - sx );
+        this.speed = 2;
+        this.acceleration = 1.05;
+        this.brightness = random( 50, 70 );
+        this.targetRadius = 1;
+    }
+
+    Firework.prototype.update = function( index ) {
+        this.coordinates.pop();
+        this.coordinates.unshift( [ this.x, this.y ] );
+        this.speed *= this.acceleration;
+        var vx = Math.cos( this.angle ) * this.speed,
+            vy = Math.sin( this.angle ) * this.speed;
+        this.distanceTraveled = calculateDistance( this.sx, this.sy, this.x + vx, this.y + vy );
+
+        if( this.distanceTraveled >= this.distanceToTarget ) {
+            // Nổ thông thường
+            createParticles( this.tx, this.ty );
+            fireworks.splice( index, 1 );
+        } else {
+            this.x += vx; this.y += vy;
+        }
+    }
+
+    Firework.prototype.draw = function() {
+        ctx.beginPath();
+        ctx.moveTo( this.coordinates[ this.coordinates.length - 1 ][ 0 ], this.coordinates[ this.coordinates.length - 1 ][ 1 ] );
+        ctx.lineTo( this.x, this.y );
+        ctx.strokeStyle = 'hsl(' + hue + ', 100%, ' + this.brightness + '%)';
+        ctx.stroke();
+    }
+
+    // --- LỚP PARTICLE (Hạt nổ - Có chỉnh sửa nhẹ cho hiệu ứng chữ) ---
+    function Particle( x, y, isTextParticle = false ) {
+        this.x = x;
+        this.y = y;
+        this.coordinates = [];
+        this.coordinateCount = 5;
+        while( this.coordinateCount-- ) { this.coordinates.push( [ this.x, this.y ] ); }
+        
+        // Nếu là hạt của chữ thì ít di chuyển hơn
+        if (isTextParticle) {
+            this.angle = random( 0, Math.PI * 2 );
+            this.speed = random( 0.5, 2 ); // Tốc độ nổ chậm
+            this.friction = 0.92; // Ma sát lớn hơn để dừng nhanh
+            this.gravity = random(0.05, 0.2); // Trọng lực rất nhẹ để chữ "treo" lâu
+            this.decay = random( 0.005, 0.015 ); // Mờ rất chậm
+            this.brightness = random( 70, 100 ); // Sáng hơn
+        } else {
+            // Hạt nổ thông thường
+            this.angle = random( 0, Math.PI * 2 );
+            this.speed = random( 1, 10 );
+            this.friction = 0.95;
+            this.gravity = 1;
+            this.decay = random( 0.015, 0.03 );
+            this.brightness = random( 50, 80 );
+        }
+        
+        this.hue = random( hue - 50, hue + 50 );
+        this.alpha = 1;
+    }
+
+    Particle.prototype.update = function( index ) {
+        this.coordinates.pop();
+        this.coordinates.unshift( [ this.x, this.y ] );
+        this.speed *= this.friction;
+        this.x += Math.cos( this.angle ) * this.speed;
+        this.y += Math.sin( this.angle ) * this.speed + this.gravity;
+        this.alpha -= this.decay;
+        if( this.alpha <= this.decay ) { particles.splice( index, 1 ); }
+    }
+
+    Particle.prototype.draw = function() {
+        ctx.beginPath();
+        ctx.moveTo( this.coordinates[ this.coordinates.length - 1 ][ 0 ], this.coordinates[ this.coordinates.length - 1 ][ 1 ] );
+        ctx.lineTo( this.x, this.y );
+        ctx.strokeStyle = 'hsla(' + this.hue + ', 100%, ' + this.brightness + '%, ' + this.alpha + ')';
+        ctx.stroke();
+    }
+
+    function createParticles( x, y ) {
+        var particleCount = 30;
+        while( particleCount-- ) {
+            particles.push( new Particle( x, y, false ) );
+        }
+    }
+
+    // --- HÀM TẠO HIỆU ỨNG CHỮ ---
+    function createTextExplosion() {
+        // Lấy tọa độ chữ "CHÀO 2026!"
+        textCoordinates = calculateTextCoordinates("CHÀO 2026!");
+        
+        // Duyệt qua từng tọa độ và tạo hạt ngay tại đó
+        for(var i = 0; i < textCoordinates.length; i++) {
+            var p = textCoordinates[i];
+            // Tạo hạt với cờ isTextParticle = true
+            particles.push( new Particle( p.x, p.y, true ) );
+        }
+
+        // Bắn thêm vài quả pháo hoa phụ họa xung quanh
+        for(let i=0; i< 5; i++) {
+             setTimeout(() => {
+                fireworks.push( new Firework( cw / 2, ch, random(cw*0.2, cw*0.8), random(ch*0.1, ch*0.5) ) );
+             }, i*300);
+        }
+    }
+
+
+    // --- XỬ LÝ SỰ KIỆN NÚT BẤM VÀ ĐẾM NGƯỢC ---
+    startBtn.addEventListener('click', function() {
+        if(gameState !== 'idle') return;
+
+        gameState = 'countdown';
+        countdownValue = 3;
+        startBtn.style.display = 'none'; // Ẩn nút
+
+        // Timer đếm ngược
+        let timer = setInterval(() => {
+            countdownValue--;
+            if(countdownValue < 0) {
+                clearInterval(timer);
+                gameState = 'celebrating';
+                // Kích hoạt hiệu ứng chữ
+                createTextExplosion();
+
+                // Sau 8 giây thì quay lại trạng thái bình thường và hiện nút
+                setTimeout(() => {
+                    gameState = 'idle';
+                    startBtn.style.display = 'block';
+                }, 8000);
+            }
+        }, 1000);
+    });
+
+
+    // --- VÒNG LẶP CHÍNH (GAME LOOP) ---
+    function loop() {
+        requestAnimFrame( loop );
+        hue += 0.5;
+
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.fillRect( 0, 0, cw, ch );
+        ctx.globalCompositeOperation = 'lighter';
+
+        // 1. Vẽ số đếm ngược nếu đang trong trạng thái countdown
+        if (gameState === 'countdown') {
+            ctx.font = 'bold 200px Arial';
+            ctx.fillStyle = 'hsla(' + hue + ', 100%, 50%, 0.8)';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(countdownValue > 0 ? countdownValue : "", cw / 2, ch / 2);
+        }
+
+        var i = fireworks.length;
+        while( i-- ) {
+            fireworks[ i ].draw();
+            fireworks[ i ].update( i );
+        }
+
+        var i = particles.length;
+        while( i-- ) {
+            particles[ i ].draw();
+            particles[ i ].update( i );
+        }
+
+        // 2. Chỉ tự động bắn pháo hoa khi KHÔNG phải đang đếm ngược hoặc đang hiện chữ
+        if( gameState === 'idle' ) {
+            if( timerTick >= timerTotal ) {
+                if( !mousedown ) {
+                    fireworks.push( new Firework( cw / 2, ch, random( 0, cw ), random( 0, ch / 2 ) ) );
+                    timerTick = 0;
+                }
+            } else {
+                timerTick++;
+            }
+        }
+
+        if( mousedown && gameState === 'idle' ) {
+             fireworks.push( new Firework( cw / 2, ch, mx, my ) );
+        }
+    }
+
+    canvas.addEventListener( 'mousemove', function( e ) {
+        mx = e.pageX - canvas.offsetLeft; my = e.pageY - canvas.offsetTop;
+    });
+    canvas.addEventListener( 'mousedown', function( e ) {
+        e.preventDefault(); mousedown = true;
+    });
+    canvas.addEventListener( 'mouseup', function( e ) {
+        e.preventDefault(); mousedown = false;
+    });
+
+    window.onload = loop;
+    // Xử lý khi resize cửa sổ
+    window.onresize = function() {
+         cw = window.innerWidth;
+         ch = window.innerHeight;
+         canvas.width = cw;
+         canvas.height = ch;
+    };
+</script>
+
+</body>
+</html>

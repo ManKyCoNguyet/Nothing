@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chào 2026 - Final Perfect</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+            font-family: 'Arial', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        #ui-layer {
+            position: absolute;
+            z-index: 100;
+            text-align: center;
+            width: 100%;
+            pointer-events: none;
+        }
+
+        #start-btn {
+            pointer-events: auto;
+            background: none;
+            border: none;
+            font-size: 80px;
+            cursor: pointer;
+            transition: transform 0.2s;
+            animation: pulse 1.5s infinite;
+        }
+        
+        #start-btn:hover { transform: scale(1.2); }
+        
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+
+        /* --- ĐÃ CHỈNH SỬA: Cỡ chữ nhỏ lại --- */
+        #countdown {
+            font-family: 'Arial', 'Helvetica', sans-serif; 
+            font-size: 12vw; /* Giảm từ 20vw xuống 12vw */
+            font-weight: bold;
+            color: #ffffff;
+            opacity: 0;
+            text-shadow: 4px 4px 10px rgba(0,0,0,0.8);
+        }
+
+        #greeting {
+            display: none;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 13vw;
+            font-weight: 900;
+            line-height: 1.1;
+            text-transform: uppercase;
+            color: #ffffff; 
+            -webkit-text-stroke: 2px #fff;
+            text-shadow: 
+                0 0 10px #fff,
+                0 0 20px #ff0055,
+                0 0 40px #ff0055,
+                0 0 80px #ff0055,
+                0 0 120px #ff0055;
+            animation: popIn 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        @keyframes popIn {
+            0% { opacity: 0; transform: scale(0.5) translateY(50px); }
+            100% { opacity: 1; transform: scale(1) translateY(0); }
+        }
+
+        .subtitle {
+            font-family: 'Arial', sans-serif;
+            font-size: 2.5vw;
+            color: #fff;
+            margin-top: 10px;
+            font-weight: normal;
+            letter-spacing: 5px;
+            text-shadow: 0 0 10px rgba(0,0,0,0.8);
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="canvas"></canvas>
+
+    <div id="ui-layer">
+        <button id="start-btn" onclick="startShow()">🎁</button>
+        <div id="countdown"></div>
+        <div id="greeting">
+            CHÀO<br>2026!
+            <div class="subtitle">Happy New Year</div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let width, height;
+        let fireworks = [];
+        let particles = [];
+        let isAutoFiring = false;
+
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        function random(min, max) { return Math.random() * (max - min) + min; }
+
+        const vibrantColors = [
+            { h: 0, s: 100, l: 60 },
+            { h: 30, s: 100, l: 60 },
+            { h: 60, s: 100, l: 60 },
+            { h: 120, s: 100, l: 60 },
+            { h: 180, s: 100, l: 60 },
+            { h: 280, s: 100, l: 60 },
+            { h: 320, s: 100, l: 60 }
+        ];
+
+        class Firework {
+            constructor(tx, ty) {
+                this.x = width / 2;
+                this.y = height;
+                this.tx = tx;
+                this.ty = ty;
+                this.distanceToTarget = Math.sqrt(Math.pow(tx - this.x, 2) + Math.pow(ty - this.y, 2));
+                this.distanceTraveled = 0;
+                this.coordinates = [];
+                this.coordinateCount = 3;
+                while(this.coordinateCount--) {
+                    this.coordinates.push([this.x, this.y]);
+                }
+                this.angle = Math.atan2(ty - height, tx - width / 2);
+                this.speed = 2;
+                this.acceleration = 1.05;
+                this.brightness = random(50, 70);
+                this.colorConfig = vibrantColors[Math.floor(Math.random() * vibrantColors.length)];
+            }
+
+            update(index) {
+                this.coordinates.pop();
+                this.coordinates.unshift([this.x, this.y]);
+                this.speed *= this.acceleration;
+                var vx = Math.cos(this.angle) * this.speed,
+                    vy = Math.sin(this.angle) * this.speed;
+                this.distanceTraveled = Math.sqrt(Math.pow(this.distanceTraveled + vx, 2) + Math.pow(this.distanceTraveled + vy, 2));
+                this.x += vx;
+                this.y += vy;
+
+                if (this.distanceTraveled >= this.distanceToTarget) {
+                    createParticles(this.tx, this.ty, this.colorConfig);
+                    fireworks.splice(index, 1);
+                }
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.moveTo(this.coordinates[this.coordinates.length - 1][0], this.coordinates[this.coordinates.length - 1][1]);
+                ctx.lineTo(this.x, this.y);
+                ctx.strokeStyle = `hsl(${this.colorConfig.h}, ${this.colorConfig.s}%, ${this.colorConfig.l}%)`;
+                ctx.lineWidth = 2; 
+                ctx.stroke();
+            }
+        }
+
+        class Particle {
+            constructor(x, y, colorConfig) {
+                this.x = x;
+                this.y = y;
+                this.coordinates = [];
+                this.coordinateCount = 6; 
+                while(this.coordinateCount--) {
+                    this.coordinates.push([this.x, this.y]);
+                }
+                this.angle = random(0, Math.PI * 2);
+                this.speed = random(1, 12); 
+                this.friction = 0.95; 
+                this.gravity = 1; 
+                
+                this.hue = colorConfig.h + random(-10, 10);
+                this.saturation = colorConfig.s;
+                this.lightness = colorConfig.l;
+                this.alpha = 1;
+                this.decay = random(0.01, 0.02);
+            }
+
+            update(index) {
+                this.coordinates.pop();
+                this.coordinates.unshift([this.x, this.y]);
+                this.speed *= this.friction;
+                this.x += Math.cos(this.angle) * this.speed;
+                this.y += Math.sin(this.angle) * this.speed + this.gravity;
+                this.alpha -= this.decay;
+
+                if (this.alpha <= this.decay) {
+                    particles.splice(index, 1);
+                }
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.moveTo(this.coordinates[this.coordinates.length - 1][0], this.coordinates[this.coordinates.length - 1][1]);
+                ctx.lineTo(this.x, this.y);
+                ctx.strokeStyle = `hsla(${this.hue}, 100%, 70%, ${this.alpha})`;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+        }
+
+        function createParticles(x, y, colorConfig) {
+            let particleCount = 200;
+            while (particleCount--) {
+                particles.push(new Particle(x, y, colorConfig));
+            }
+        }
+
+        let limiterTick = 0;
+
+        function loop() {
+            requestAnimationFrame(loop);
+
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+            ctx.fillRect(0, 0, width, height);
+            ctx.globalCompositeOperation = 'lighter';
+
+            let i = fireworks.length;
+            while (i--) {
+                fireworks[i].draw();
+                fireworks[i].update(i);
+            }
+
+            let j = particles.length;
+            while (j--) {
+                particles[j].draw();
+                particles[j].update(j);
+            }
+
+            if (isAutoFiring) {
+                limiterTick++;
+                if (limiterTick >= 3) {
+                    let targetX = width / 2 + random(-500, 500); 
+                    let targetY = height / 2 + random(-400, 100);
+                    fireworks.push(new Firework(targetX, targetY));
+                    limiterTick = 0;
+                }
+            }
+        }
+        loop();
+
+        function startShow() {
+            const btn = document.getElementById('start-btn');
+            const countdownEl = document.getElementById('countdown');
+            const greetingEl = document.getElementById('greeting');
+            
+            btn.style.opacity = '0';
+            setTimeout(() => { btn.style.display = 'none'; }, 200);
+
+            countdownEl.style.opacity = 1;
+            let count = 3;
+            countdownEl.innerText = count;
+
+            let countInterval = setInterval(() => {
+                count--;
+                if (count > 0) {
+                    countdownEl.innerText = count;
+                } else {
+                    clearInterval(countInterval);
+                    countdownEl.style.display = 'none';
+                    greetingEl.style.display = 'block';
+                    isAutoFiring = true; 
+                    
+                    for(let k=0; k<8; k++) {
+                        fireworks.push(new Firework(width/2 + random(-300, 300), height/2 + random(-300, -100)));
+                    }
+                }
+            }, 1000);
+        }
+    </script>
+</body>
+</html>
