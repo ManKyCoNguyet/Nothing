@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>melting heart</title>
+<style>
+  body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background-color: #000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+  }
+  canvas {
+    display: block;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+
+<script>
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+
+  let width = canvas.width = window.innerWidth;
+  let height = canvas.height = window.innerHeight;
+
+  const colors = ['#ff1744', '#ff6b9d', '#e91e63', '#c2185b', '#ff6ec7', '#ff4757'];
+
+  let time = 0;
+
+  let elipseOpacity = 0;
+  
+  let elipseWaveCount = 0;
+  let lastParticlesOnEllipseState = false;
+
+  let heartAngleX = 0;
+  let heartAngleY = 0;
+
+  class HeartParticle {
+    constructor() {
+      this.createHeartPosition();
+      this.size = Math.random() * 0.9 + 0.4;
+      this.color = colors[Math.floor(Math.random() * colors.length)];
+    }
+
+    createHeartPosition() {
+      let u, v, heartX, heartY;
+      while (true) {
+        u = Math.random() * Math.PI * 2;
+        v = Math.random() * Math.PI;
+        
+        heartX = 16 * Math.pow(Math.sin(u), 3);
+        heartY = 13 * Math.cos(u) - 5 * Math.cos(2 * u) - 2 * Math.cos(3 * u) - Math.cos(4 * u);
+        
+        const centerAvoidance = Math.abs(heartX) / 16;
+        const edgeWeighted = Math.pow(centerAvoidance, 1.6);
+        const acceptProbability = 0.05 + edgeWeighted * 0.95;
+        if (Math.random() < acceptProbability) break;
+      }
+
+      const scaleFactor = 10;
+      this.heartBaseX = heartX * Math.sin(v) * scaleFactor;
+      this.heartBaseY = -heartY * Math.sin(v) * scaleFactor;
+      this.heartBaseZ = 10 * Math.cos(v) * scaleFactor;
+    }
+
+    getPosition(angleX, angleY) {
+      let x1 = this.heartBaseX * Math.cos(angleY) - this.heartBaseZ * Math.sin(angleY);
+      let z1 = this.heartBaseZ * Math.cos(angleY) + this.heartBaseX * Math.sin(angleY);
+      let y1 = this.heartBaseY;
+
+      let y2 = y1 * Math.cos(angleX) - z1 * Math.sin(angleX);
+      let z2 = z1 * Math.cos(angleX) + y1 * Math.sin(angleX);
+      let x2 = x1;
+
+      const fov = 400;
+      const scale = fov / (fov + z2);
+
+      return {
+        x: width / 2 + x2 * scale,
+        y: height / 2 - 150 + y2 * scale,
+        z: z2
+      };
+    }
+
+    draw() {
+      const pos = this.getPosition(heartAngleX, heartAngleY);
+      const alpha = Math.max(0.1, Math.min(1, (pos.z + 200) / 400));
+      
+      ctx.globalAlpha = alpha;
+      ctx.shadowBlur = 5;
+      ctx.shadowColor = this.color;
+
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, this.size, 0, Math.PI * 2);
+      ctx.fillStyle = this.color;
+      ctx.fill();
+
+      this.currentZ = pos.z;
+      this.currentX = pos.x;
+      this.currentY = pos.y;
+    }
+  }
+
+  class DrippingParticle {
+    constructor() {
+      this.reset();
+      this.isMainDrip = Math.random() < 0.15;
+    }
+
+    reset() {
+
+      let bottomParticle = heartParticles[0];
+      let maxY = bottomParticle.currentY || 0;
+      
+      for (let i = 1; i < heartParticles.length; i++) {
+        if ((heartParticles[i].currentY || 0) > maxY) {
+          maxY = heartParticles[i].currentY || 0;
+          bottomParticle = heartParticles[i];
+        }
+      }
+
+      if (this.isMainDrip) {
+        const tailPos = bottomParticle.getPosition(heartAngleX, heartAngleY);
+        this.x = tailPos.x + (Math.random() - 0.5) * 15;
+        this.y = tailPos.y;
+        this.z = tailPos.z;
+        
+        this.vx = (Math.random() - 0.5) * 0.15;
+        this.vy = 2.8 + Math.random() * 1.8;
+        this.size = Math.random() * 0.8 + 0.45;
+      } else {
+        const sourceParticle = heartParticles[Math.floor(Math.random() * heartParticles.length)];
+        const pos = sourceParticle.getPosition(heartAngleX, heartAngleY);
+        
+        if (pos.y < height / 2 - 50) {
+          this.reset();
+          return;
+        }
+
+        this.x = pos.x;
+        this.y = pos.y;
+        this.z = pos.z;
+        
+        this.vx = (Math.random() - 0.5) * 0.5;
+        this.vy = 1.8 + Math.random() * 2.7;
+        this.size = Math.random() * 0.6 + 0.3;
+      }
+      
+      this.color = colors[Math.floor(Math.random() * colors.length)];
+      this.life = 1;
+      this.decayRate = 0.008 + Math.random() * 0.01;
+      this.onEllipse = false;
+      this.ellipseLife = 0;
+      this.orbitAngle = 0;
+      this.orbitSpeed = 0.008 + Math.random() * 0.002;
+      this.radialFactor = 0.3 + Math.random() * 0.7;
+      this.poolLevel = 1;
+    }
+
+    update() {
+      if (this.onEllipse) {
+        this.ellipseLife += 0.02;
+        const ellipseCenterX = width / 2;
+        const ellipseCenterY = this.poolLevel === 1 ? (height / 2 + 280) : (height / 2 + 380);
+        const growthFactor = 1 + this.ellipseLife * 0.08;
+        const radiusX = this.poolLevel === 1 ? (160 * growthFactor) : (180 * growthFactor);
+        const radiusY = this.poolLevel === 1 ? (60 * growthFactor) : (70 * growthFactor);
+        
+        if (this.poolLevel === 1 && this.ellipseLife > 1.5) {
+          this.radialFactor += 0.015;
+        }
+        
+        if (this.radialFactor > 1.2 && this.poolLevel === 1) {
+          this.onEllipse = false;
+          this.vy = 1.8 + Math.random() * 1.5;
+          this.poolLevel = 0;
+          return;
+        }
+        
+        this.orbitAngle += this.orbitSpeed;
+        this.x = ellipseCenterX + Math.cos(this.orbitAngle) * radiusX * this.radialFactor;
+        this.y = ellipseCenterY + Math.sin(this.orbitAngle) * radiusY * this.radialFactor;
+        
+        this.life -= 0.005;
+        
+        const maxLife = this.poolLevel === 1 ? 5 : 10;
+        if (this.ellipseLife > maxLife || this.life <= 0) {
+          this.reset();
+        }
+      } else {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.vy += 0.11;
+        
+        this.life -= this.decayRate;
+        
+
+        const ellipseCenterY2 = height / 2 + 380;
+        const distY2 = Math.abs(this.y - ellipseCenterY2);
+        const distX2 = Math.abs(this.x - width / 2);
+        const a2 = 180;
+        const b2 = 70;
+        const ellipseTest2 = (distX2 / a2) ** 2 + (distY2 / b2) ** 2;
+        
+        if (ellipseTest2 <= 1.0 && this.y >= ellipseCenterY2 - 20) {
+          this.onEllipse = true;
+          this.poolLevel = 2;
+          this.ellipseLife = 0;
+          this.vy = 0;
+          this.radialFactor = 0.3 + Math.random() * 0.7;
+          const ellipseCenterX = width / 2;
+          const radiusX = 180;
+          const radiusY = 70;
+          this.orbitAngle = Math.atan2((this.y - ellipseCenterY2) / radiusY, (this.x - ellipseCenterX) / radiusX);
+          return;
+        }
+        
+
+        const ellipseCenterY = height / 2 + 280;
+        const distY = Math.abs(this.y - ellipseCenterY);
+        const distX = Math.abs(this.x - width / 2);
+        
+        const a = 160;
+        const b = 60;
+        const ellipseTest = (distX / a) ** 2 + (distY / b) ** 2;
+        
+        if (ellipseTest <= 1.1 && this.y >= ellipseCenterY - 20) {
+          this.onEllipse = true;
+          this.poolLevel = 1;
+          const ellipseCenterX = width / 2;
+          const radiusX = 160;
+          const radiusY = 60;
+          this.orbitAngle = Math.atan2((this.y - ellipseCenterY) / radiusY, (this.x - ellipseCenterX) / radiusX);
+          this.ellipseLife = 0;
+          this.vy = 0;
+        }
+        
+        if (this.life <= 0) {
+          this.reset();
+        }
+      }
+    }
+
+    draw() {
+      const alpha = this.isMainDrip ? this.life : (this.life * 0.8);
+      const shadowBlur = this.isMainDrip ? 8 : 4;
+      
+      ctx.globalAlpha = alpha;
+      ctx.shadowBlur = shadowBlur;
+      ctx.shadowColor = this.color;
+
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+      ctx.fillStyle = this.color;
+      ctx.fill();
+    }
+  }
+
+  const heartParticles = [];
+  const heartParticleCount = 1200;
+
+  for (let i = 0; i < heartParticleCount; i++) {
+    heartParticles.push(new HeartParticle());
+  }
+
+  const drippingParticles = [];
+  const drippingParticleCount = 1000;
+
+  for (let i = 0; i < drippingParticleCount; i++) {
+    drippingParticles.push(new DrippingParticle());
+  }
+
+  class EllipseParticle {
+    constructor() {
+      let angle = Math.random() * Math.PI * 2;
+      let radiusFactor = Math.sqrt(Math.random());
+      
+      this.radiusX = 160;
+      this.radiusY = 60;
+      
+      this.orbitAngle = angle;
+      this.orbitRadiusFactor = radiusFactor;
+      this.orbitSpeed = 0.01 + Math.random() * 0.02;
+      this.phase = Math.random() * Math.PI * 2;
+      
+      this.size = Math.random() * 0.8 + 0.3;
+      this.color = colors[Math.floor(Math.random() * colors.length)];
+    }
+
+    update() {
+      this.orbitAngle += this.orbitSpeed;
+    }
+
+    draw(centerX, centerY) {
+      let breathing = 1 + Math.sin(time + this.phase) * 0.06;
+      let localX = Math.cos(this.orbitAngle) * this.radiusX * this.orbitRadiusFactor * breathing;
+      let localY = Math.sin(this.orbitAngle) * this.radiusY * this.orbitRadiusFactor * breathing;
+      
+      let x = centerX + localX;
+      let y = centerY + localY;
+      
+      ctx.globalAlpha = elipseOpacity;
+      ctx.shadowBlur = 5;
+      ctx.shadowColor = this.color;
+      
+      ctx.beginPath();
+      ctx.arc(x, y, this.size, 0, Math.PI * 2);
+      ctx.fillStyle = this.color;
+      ctx.fill();
+    }
+  }
+
+  const ellipseParticles = [];
+  const ellipseParticleCount = 350;
+
+  for (let i = 0; i < ellipseParticleCount; i++) {
+    ellipseParticles.push(new EllipseParticle());
+  }
+
+  function animate() {
+    time += 0.02;
+
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, width, height);
+
+    // Update heart rotation
+    heartAngleX = Math.sin(Date.now() * 0.001) * 0.2;
+    heartAngleY += 0.03;
+
+    heartParticles.sort((a, b) => (b.currentZ || 0) - (a.currentZ || 0));
+    for (let particle of heartParticles) {
+      particle.draw();
+    }
+
+    let hasParticlesOnEllipse = false;
+    for (let particle of drippingParticles) {
+      particle.update();
+      particle.draw();
+      if (particle.onEllipse) {
+        hasParticlesOnEllipse = true;
+      }
+    }
+
+    if (hasParticlesOnEllipse && !lastParticlesOnEllipseState) {
+      elipseWaveCount++;
+    }
+    lastParticlesOnEllipseState = hasParticlesOnEllipse;
+    
+    if (elipseWaveCount >= 2) {
+      if (hasParticlesOnEllipse) {
+        elipseOpacity = Math.min(1, elipseOpacity + 0.01);
+      } else {
+        elipseOpacity = Math.max(0, elipseOpacity - 0.005);
+      }
+    }
+
+    const ellipseCenterX = width / 2;
+    const ellipseCenterY = height / 2 + 280;
+
+    for (let particle of ellipseParticles) {
+      particle.update();
+      particle.draw(ellipseCenterX, ellipseCenterY);
+    }
+
+    requestAnimationFrame(animate);
+  }
+
+  window.addEventListener('resize', () => {
+    width = canvas.width = window.innerWidth;
+    height = canvas.height = window.innerHeight;
+  });
+
+  animate();
+
+</script>
+
+</body>
+</html>
